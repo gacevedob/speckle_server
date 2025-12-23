@@ -16,12 +16,16 @@ echo "3. Logs de MinIO (últimas 10 líneas):"
 docker-compose logs --tail=10 minio
 
 echo ""
-echo "4. Logs de create-bucket (configuración CORS):"
-docker-compose logs create-bucket | grep -E "(CORS|ERROR|cors)"
+echo "4. Logs de minio-init (configuración CORS):"
+if docker-compose ps --services | grep -q "^minio-init$"; then
+  docker-compose logs minio-init | grep -E "(CORS|ERROR|cors)" || echo "No hay logs relevantes de minio-init"
+else
+  echo "⚠️ Servicio minio-init no está definido en este compose"
+fi
 
 echo ""
 echo "5. Variables S3 en Speckle Server:"
-docker-compose exec -T speckle-server /bin/sh -c 'env | grep S3' 2>/dev/null || echo "Error accediendo al contenedor"
+docker-compose exec -T speckle-server /bin/sh -c 'env | grep S3' 2>/dev/null || echo "⚠️ Error accediendo al contenedor o variables no presentes"
 
 echo ""
 echo "6. Test CORS directo:"
