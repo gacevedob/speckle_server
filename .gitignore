@@ -6,3 +6,8 @@ redis-data/
 # (opcional) logs/temporales
 *.log
 tmp/
+
+postgres-data/
+redis-data/
+minio-data/
+*.rdb
