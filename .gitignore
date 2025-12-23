@@ -11,3 +11,8 @@ postgres-data/
 redis-data/
 minio-data/
 *.rdb
+
+postgres-data/
+redis-data/
+minio-data/
+*.rdb
