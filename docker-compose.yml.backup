@@ -92,8 +92,8 @@ services:
     entrypoint: >
       /bin/sh -c "
       set -euo pipefail;
-      BUCKET=\"${S3_BUCKET:-speckle-server}\";
-      PUBLIC=\"${MINIO_SET_PUBLIC:-true}\";
+      BUCKET=\"$${S3_BUCKET:-speckle-server}\";
+      PUBLIC=\"$${MINIO_SET_PUBLIC:-true}\";
       CORS_FILE=\"\";
       if [ -f /config/cors.json ]; then
         CORS_FILE=/config/cors.json;
@@ -101,7 +101,7 @@ services:
         CORS_FILE=/config/cors.xml;
       fi;
       echo 'Configuring MinIO bucket:' $BUCKET;
-      mc alias set myminio http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
+      mc alias set myminio http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD};
       mc mb myminio/${BUCKET} --ignore-existing;
       if [ \"$PUBLIC\" = \"true\" ]; then
         mc anonymous set download myminio/${BUCKET};
