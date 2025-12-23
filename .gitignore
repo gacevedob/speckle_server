@@ -1,18 +1,9 @@
 # Data / volumes (no versionar)
 postgres-data/
 redis-data/
+minio-data/
 *.rdb
 
-# (opcional) logs/temporales
+# logs/temporales
 *.log
 tmp/
-
-postgres-data/
-redis-data/
-minio-data/
-*.rdb
-
-postgres-data/
-redis-data/
-minio-data/
-*.rdb
