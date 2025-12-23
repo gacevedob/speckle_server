@@ -55,17 +55,29 @@ docker-compose logs speckle-server | grep -E "(S3|MinIO|BlobStorage|s3|minio)" |
 echo ""
 echo "7️⃣ LOGS CRÍTICOS Create Bucket..."
 echo -e "${YELLOW}--- Create Bucket Logs ---${NC}"
-docker-compose logs create-bucket
+if docker-compose ps --services | grep -q "^minio-init$"; then
+  docker-compose logs minio-init
+else
+  echo -e "${YELLOW}Servicio minio-init no está definido en este compose.${NC}"
+fi
 
 echo ""
 echo "8️⃣ VERIFICANDO VARIABLES DE ENTORNO S3 EN SPECKLE SERVER..."
 echo -e "${YELLOW}--- S3 Environment Variables ---${NC}"
-docker-compose exec -T speckle-server printenv | grep -E "^S3_|^MINIO_" | sort
+if docker-compose ps --services | grep -q "^speckle-server$"; then
+  docker-compose exec -T speckle-server printenv | grep -E "^S3_|^MINIO_" | sort || echo -e "${YELLOW}No se pudieron obtener variables S3 del servidor.${NC}"
+else
+  echo -e "${YELLOW}Servicio speckle-server no está disponible.${NC}"
+fi
 
 echo ""
 echo "9️⃣ VERIFICANDO VARIABLES DE ENTORNO S3 EN FRONTEND..."
 echo -e "${YELLOW}--- Frontend S3 Environment Variables ---${NC}"
-docker-compose exec -T speckle-frontend-2 printenv | grep -E "NUXT.*S3|NUXT.*UPLOAD" | sort
+if docker-compose ps --services | grep -q "^speckle-frontend-2$"; then
+  docker-compose exec -T speckle-frontend-2 printenv | grep -E "NUXT.*S3|NUXT.*UPLOAD" | sort || echo -e "${YELLOW}No se pudieron obtener variables S3 del frontend.${NC}"
+else
+  echo -e "${YELLOW}Servicio speckle-frontend-2 no está disponible.${NC}"
+fi
 
 echo ""
 echo "🔟 TEST DE PRESIGNED URL (simulación)..."

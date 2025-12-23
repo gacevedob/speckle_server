@@ -42,19 +42,19 @@ services:
 
   minio:
     image: 'minio/minio'
-    command: server /data --console-address ":9001"
+    command: server /data --console-address ":9001" --address ":9000"
     restart: always
     mem_limit: 1g
     memswap_limit: 1g
     environment:
       # CONFIGURACIÓN BÁSICA
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
       MINIO_REGION: us-east-1
       
       # CONFIGURACIÓN DE SERVIDOR PARA SUBDOMINIO
-      MINIO_SERVER_URL: "https://minio.datificabimcloud.dpdns.org"
-      MINIO_BROWSER_REDIRECT_URL: "https://console.datificabimcloud.dpdns.org"
+      MINIO_SERVER_URL: "${MINIO_PUBLIC_HOSTNAME:+https://${MINIO_PUBLIC_HOSTNAME}}"
+      MINIO_BROWSER_REDIRECT_URL: "${MINIO_BROWSER_REDIRECT_URL:-https://datificabimcloud.dpdns.org/minio-console}"
       
       # CONFIGURACIÓN CORS MEJORADA
       MINIO_API_CORS_ALLOW_ORIGIN: "*"
@@ -64,7 +64,7 @@ services:
       MINIO_API_CORS_MAX_AGE: "86400"
       
       # CONFIGURACIÓN DE DOMINIO PARA VIRTUAL HOST
-      MINIO_DOMAIN: "minio.datificabimcloud.dpdns.org"
+      MINIO_DOMAIN: "${MINIO_PUBLIC_HOSTNAME:-}"
     volumes:
       - ./minio-data:/data
     healthcheck:
@@ -76,8 +76,49 @@ services:
     networks:
       - speckle-network
 
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      S3_BUCKET: ${S3_BUCKET:-speckle-server}
+      MINIO_SET_PUBLIC: ${MINIO_SET_PUBLIC:-true}
+    volumes:
+      - ./cors.json:/config/cors.json:ro
+      - ./cors.xml:/config/cors.xml:ro
+    entrypoint: >
+      /bin/sh -c "
+      set -euo pipefail;
+      BUCKET=\"${S3_BUCKET:-speckle-server}\";
+      PUBLIC=\"${MINIO_SET_PUBLIC:-true}\";
+      CORS_FILE=\"\";
+      if [ -f /config/cors.json ]; then
+        CORS_FILE=/config/cors.json;
+      elif [ -f /config/cors.xml ]; then
+        CORS_FILE=/config/cors.xml;
+      fi;
+      echo 'Configuring MinIO bucket:' $BUCKET;
+      mc alias set myminio http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
+      mc mb myminio/${BUCKET} --ignore-existing;
+      if [ \"$PUBLIC\" = \"true\" ]; then
+        mc anonymous set download myminio/${BUCKET};
+      fi;
+      if [ -n \"$CORS_FILE\" ]; then
+        mc cors set myminio/${BUCKET} $CORS_FILE;
+      else
+        echo 'No CORS file found, skipping CORS configuration';
+      fi;
+      mc cors list myminio/${BUCKET} || true;
+      echo 'MinIO bucket configured successfully';
+      "
+    networks:
+      - speckle-network
+
   speckle-server:
-    image: speckle/speckle-server:latest
+    image: speckle/speckle-server:2.26.8
     restart: always
     mem_limit: 2g
     memswap_limit: 2g
@@ -98,6 +139,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     environment:
       CANONICAL_URL: 'https://datificabimcloud.dpdns.org'
       PRIVATE_OBJECTS_SERVER_URL: 'http://speckle-server:3000'
@@ -113,16 +156,15 @@ services:
       
       # CONFIGURACIÓN S3 CORREGIDA PARA VIRTUAL HOST STYLE
       S3_ENDPOINT: 'http://minio:9000'
-      S3_PUBLIC_ENDPOINT: 'https://minio.datificabimcloud.dpdns.org'
+      S3_PUBLIC_ENDPOINT: '${S3_PUBLIC_ENDPOINT:-https://datificabimcloud.dpdns.org}'
       S3_ACCESS_KEY: 'minioadmin'
       S3_SECRET_KEY: 'minioadmin'
       S3_BUCKET: 'speckle-server'
       S3_CREATE_BUCKET: 'true'
       S3_REGION: 'us-east-1'
-      # CAMBIO CRÍTICO: Volver a path-style temporalmente para debug
-      S3_FORCE_PATH_STYLE: 'true'   # Cambiar a path-style para simplificar
-      S3_USE_SSL: 'false'           # Interno sin SSL
-      S3_PUBLIC_USE_SSL: 'true'     # Público con SSL
+      S3_FORCE_PATH_STYLE: 'true'
+      S3_USE_SSL: 'false'
+      S3_PUBLIC_USE_SSL: 'true'
       
       # Features
       FF_EXPERIMENTAL_IFC_IMPORTER_ENABLED: 'true'
@@ -146,6 +188,17 @@ services:
       dockerfile: Dockerfile.frontend
     restart: always
     mem_limit: 512m
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - /bin/sh
+        - -c
+        - >
+          node -e "require('http').get('http://127.0.0.1:8080', res => { process.exit(res.statusCode >= 200 && res.statusCode < 500 ? 0 : 1); }).on('error', () => process.exit(1));"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
     environment:
       NUXT_PUBLIC_SERVER_NAME: 'DataBIM Cloud'
       NUXT_PUBLIC_API_ORIGIN: 'https://datificabimcloud.dpdns.org'
@@ -166,7 +219,7 @@ services:
       - speckle-network
 
   preview-service:
-    image: speckle/speckle-preview-service:latest
+    image: speckle/speckle-preview-service:2.26.8
     restart: always
     mem_limit: 1g
     environment:
@@ -187,7 +240,7 @@ services:
       - speckle-network
 
   webhook-service:
-    image: speckle/speckle-webhook-service:latest
+    image: speckle/speckle-webhook-service:2.26.8
     restart: always
     mem_limit: 256m
     environment:
@@ -203,7 +256,7 @@ services:
       - speckle-network
 
   fileimport-service:
-    image: speckle/speckle-fileimport-service:latest
+    image: speckle/speckle-fileimport-service:2.26.8
     restart: always
     mem_limit: 2g
     memswap_limit: 2g
@@ -217,13 +270,13 @@ services:
       
       # MISMA CONFIGURACIÓN S3 QUE SPECKLE-SERVER
       S3_ENDPOINT: 'http://minio:9000'
-      S3_PUBLIC_ENDPOINT: 'https://minio.datificabimcloud.dpdns.org'
+      S3_PUBLIC_ENDPOINT: '${S3_PUBLIC_ENDPOINT:-https://datificabimcloud.dpdns.org}'
       S3_ACCESS_KEY: 'minioadmin'
       S3_SECRET_KEY: 'minioadmin'
       S3_BUCKET: 'speckle-server'
       S3_REGION: 'us-east-1'
       # CAMBIO CRÍTICO: Path-style para debug
-      S3_FORCE_PATH_STYLE: 'true'   # Cambiar a path-style
+      S3_FORCE_PATH_STYLE: 'true'
       S3_USE_SSL: 'false'
       S3_PUBLIC_USE_SSL: 'true'
       
@@ -259,14 +312,25 @@ services:
     image: nginx:alpine
     restart: always
     mem_limit: 256m
+    environment:
+      - NGINX_ENABLE_CATCH_ALL=${NGINX_ENABLE_CATCH_ALL:-}
     depends_on:
-      - speckle-server
-      - speckle-frontend-2
-      - minio
+      speckle-server:
+        condition: service_healthy
+      speckle-frontend-2:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
     ports:
       - "34355:80"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost/readiness || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
     networks:
       - speckle-network
 
