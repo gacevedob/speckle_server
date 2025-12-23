@@ -1,0 +1,145 @@
+events {
+    worker_connections 1024;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+
+    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                   '$status $body_bytes_sent "$http_referer" '
+                   '"$http_user_agent" "$http_x_forwarded_for"';
+    access_log /var/log/nginx/access.log main;
+    error_log /var/log/nginx/error.log warn;
+
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+    types_hash_max_size 2048;
+    client_max_body_size 1024m;
+
+    upstream speckle_frontend {
+        server speckle-frontend-2:8080;
+    }
+
+    upstream speckle_server {
+        server speckle-server:3000;
+    }
+
+    upstream minio_api {
+        server minio:9000;
+    }
+
+    upstream minio_console {
+        server minio:9001;
+    }
+
+    server {
+        listen 80;
+        server_name _;
+
+        proxy_connect_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+
+        # MinIO bucket directo
+        location /speckle-server/ {
+            proxy_set_header Host $http_host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Amz-Content-Sha256 $http_x_amz_content_sha256;
+            proxy_set_header X-Amz-Date $http_x_amz_date;
+            proxy_set_header Authorization $http_authorization;
+            proxy_buffering off;
+            proxy_request_buffering off;
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_pass http://minio_api;
+            proxy_connect_timeout 300s;
+            proxy_send_timeout 1800s;
+            proxy_read_timeout 1800s;
+        }
+
+        # MinIO legacy path
+        location /minio/ {
+            proxy_set_header Host $http_host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Amz-Content-Sha256 $http_x_amz_content_sha256;
+            proxy_set_header X-Amz-Date $http_x_amz_date;
+            proxy_set_header Authorization $http_authorization;
+            proxy_buffering off;
+            proxy_request_buffering off;
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            rewrite ^/minio/(.*)$ /$1 break;
+            proxy_pass http://minio_api;
+            proxy_connect_timeout 300s;
+            proxy_send_timeout 1800s;
+            proxy_read_timeout 1800s;
+        }
+
+        # MinIO Console
+        location /minio-console/ {
+            proxy_set_header Host $http_host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_http_version 1.1;
+            rewrite ^/minio-console/(.*)$ /$1 break;
+            proxy_pass http://minio_console;
+        }
+
+        # GraphQL WebSocket
+        location /graphql {
+            proxy_pass http://speckle_server;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_buffering off;
+        }
+
+        # API Endpoints
+        location ~ ^/(api|explorer) {
+            proxy_pass http://speckle_server;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # Static Assets
+        location ~ ^/(_nuxt|__nuxt|assets|web-api)/ {
+            proxy_pass http://speckle_frontend;
+            proxy_set_header Host $host;
+            proxy_cache off;
+        }
+
+        # Frontend maneja todo lo demás (incluyendo /auth, /authn, etc)
+        location / {
+            proxy_pass http://speckle_frontend;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+        }
+
+        location /nginx-health {
+            access_log off;
+            return 200 "healthy\n";
+            add_header Content-Type text/plain;
+        }
+    }
+}

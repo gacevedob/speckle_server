@@ -1,0 +1,20 @@
+{
+  "CORSRules": [
+    {
+      "ID": "SpeckleDomainUpload",
+      "AllowedOrigins": ["https://datificabimcloud.dpdns.org"],
+      "AllowedMethods": ["GET", "PUT", "POST", "DELETE", "HEAD", "OPTIONS"],
+      "AllowedHeaders": ["*"],
+      "ExposeHeaders": ["ETag", "x-amz-request-id", "Content-Length", "Content-Range"],
+      "MaxAgeSeconds": 86400
+    },
+    {
+      "ID": "SpeckleAllOrigins",
+      "AllowedOrigins": ["*"],
+      "AllowedMethods": ["GET", "PUT", "POST", "DELETE", "HEAD", "OPTIONS"],
+      "AllowedHeaders": ["*"],
+      "ExposeHeaders": ["ETag", "x-amz-request-id", "Content-Length", "Content-Range"],
+      "MaxAgeSeconds": 86400
+    }
+  ]
+}

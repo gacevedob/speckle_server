@@ -1,0 +1,8 @@
+# Data / volumes (no versionar)
+postgres-data/
+redis-data/
+*.rdb
+
+# (opcional) logs/temporales
+*.log
+tmp/

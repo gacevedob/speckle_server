@@ -1,0 +1,275 @@
+# docker-compose.yml
+services:
+  postgres:
+    image: 'postgres:16.9-alpine'
+    restart: always
+    environment:
+      POSTGRES_DB: speckle
+      POSTGRES_USER: speckle
+      POSTGRES_PASSWORD: speckle
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data/
+    command: >
+      postgres
+      -c max_connections=200
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+      -c work_mem=16MB
+      -c maintenance_work_mem=256MB
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U speckle -d speckle"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - speckle-network
+
+  redis:
+    image: 'redis:8-alpine'
+    restart: always
+    volumes:
+      - ./redis-data:/data
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks:
+      - speckle-network
+
+  minio:
+    image: 'minio/minio'
+    command: server /data --console-address ":9001"
+    restart: always
+    mem_limit: 1g
+    memswap_limit: 1g
+    environment:
+      # CONFIGURACIÓN BÁSICA
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_REGION: us-east-1
+      
+      # CONFIGURACIÓN DE SERVIDOR PARA SUBDOMINIO
+      MINIO_SERVER_URL: "https://minio.datificabimcloud.dpdns.org"
+      MINIO_BROWSER_REDIRECT_URL: "https://console.datificabimcloud.dpdns.org"
+      
+      # CONFIGURACIÓN CORS MEJORADA
+      MINIO_API_CORS_ALLOW_ORIGIN: "*"
+      MINIO_API_CORS_ALLOW_METHODS: "GET,POST,PUT,DELETE,HEAD,OPTIONS"
+      MINIO_API_CORS_ALLOW_HEADERS: "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,x-amz-content-sha256,x-amz-date,x-amz-security-token"
+      MINIO_API_CORS_EXPOSE_HEADERS: "Content-Length,Content-Range,ETag"
+      MINIO_API_CORS_MAX_AGE: "86400"
+      
+      # CONFIGURACIÓN DE DOMINIO PARA VIRTUAL HOST
+      MINIO_DOMAIN: "minio.datificabimcloud.dpdns.org"
+    volumes:
+      - ./minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - speckle-network
+
+  speckle-server:
+    image: speckle/speckle-server:latest
+    restart: always
+    mem_limit: 2g
+    memswap_limit: 2g
+    healthcheck:
+      test:
+        - CMD
+        - /nodejs/bin/node
+        - -e
+        - "try { require('node:http').request({headers: {'Content-Type': 'application/json'}, port:3000, hostname:'127.0.0.1', path:'/readiness', method: 'GET', timeout: 2000 }, (res) => { body = ''; res.on('data', (chunk) => {body += chunk;}); res.on('end', () => {process.exit(res.statusCode != 200 || body.toLowerCase().includes('error') ? 1 : 0);}); }).end(); } catch { process.exit(1); }"
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 120s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      CANONICAL_URL: 'https://datificabimcloud.dpdns.org'
+      PRIVATE_OBJECTS_SERVER_URL: 'http://speckle-server:3000'
+      SESSION_SECRET: 'abcdefghijklmnopqrstuvwxyz1234567890'
+      STRATEGY_LOCAL: 'true'
+      LOG_LEVEL: 'info'
+      LOG_PRETTY: 'true'
+      POSTGRES_URL: 'postgres'
+      POSTGRES_USER: 'speckle'
+      POSTGRES_PASSWORD: 'speckle'
+      POSTGRES_DB: 'speckle'
+      REDIS_URL: 'redis://redis'
+      
+      # CONFIGURACIÓN S3 CORREGIDA PARA VIRTUAL HOST STYLE
+      S3_ENDPOINT: 'http://minio:9000'
+      S3_PUBLIC_ENDPOINT: 'https://minio.datificabimcloud.dpdns.org'
+      S3_ACCESS_KEY: 'minioadmin'
+      S3_SECRET_KEY: 'minioadmin'
+      S3_BUCKET: 'speckle-server'
+      S3_CREATE_BUCKET: 'true'
+      S3_REGION: 'us-east-1'
+      # CAMBIO CRÍTICO: Volver a path-style temporalmente para debug
+      S3_FORCE_PATH_STYLE: 'true'   # Cambiar a path-style para simplificar
+      S3_USE_SSL: 'false'           # Interno sin SSL
+      S3_PUBLIC_USE_SSL: 'true'     # Público con SSL
+      
+      # Features
+      FF_EXPERIMENTAL_IFC_IMPORTER_ENABLED: 'true'
+      FF_LEGACY_FILE_IMPORTS_ENABLED: 'false'
+      FILE_UPLOADS_ENABLED: 'true'
+      FILE_UPLOAD_MAX_SIZE_MB: '1024'
+      
+      # Performance
+      NODE_OPTIONS: '--max-old-space-size=1536 --max-semi-space-size=128'
+      EMAIL_FROM: 'no-reply@datificabimcloud.dpdns.org'
+      FRONTEND_ORIGIN: 'https://datificabimcloud.dpdns.org'
+      TRUST_PROXY: 'true'
+      PORT: '3000'
+      HOST: '0.0.0.0'
+    networks:
+      - speckle-network
+
+  speckle-frontend-2:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    restart: always
+    mem_limit: 512m
+    environment:
+      NUXT_PUBLIC_SERVER_NAME: 'DataBIM Cloud'
+      NUXT_PUBLIC_API_ORIGIN: 'https://datificabimcloud.dpdns.org'
+      NUXT_PUBLIC_BASE_URL: 'https://datificabimcloud.dpdns.org'
+      NUXT_PUBLIC_BACKEND_API_ORIGIN: 'http://speckle-server:3000'
+      NUXT_PUBLIC_LOG_LEVEL: 'warn'
+      NUXT_REDIS_URL: 'redis://redis'
+      NUXT_PUBLIC_FF_LEGACY_FILE_IMPORTS_ENABLED: 'false'
+      NUXT_PUBLIC_MAX_FILE_SIZE: '1073741824'
+      LOG_LEVEL: 'info'
+      LOG_PRETTY: 'true'
+    depends_on:
+      speckle-server:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - speckle-network
+
+  preview-service:
+    image: speckle/speckle-preview-service:latest
+    restart: always
+    mem_limit: 1g
+    environment:
+      LOG_LEVEL: 'info'
+      LOG_PRETTY: 'true'
+      REDIS_URL: 'redis://redis'
+      PG_CONNECTION_STRING: 'postgres://speckle:speckle@postgres/speckle'
+      PORT: '3001'
+      HOST: '0.0.0.0'
+      NODE_OPTIONS: '--max-old-space-size=768'
+      PREVIEW_TIMEOUT_MS: '900000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - speckle-network
+
+  webhook-service:
+    image: speckle/speckle-webhook-service:latest
+    restart: always
+    mem_limit: 256m
+    environment:
+      LOG_LEVEL: 'info'
+      LOG_PRETTY: 'true'
+      PG_CONNECTION_STRING: 'postgres://speckle:speckle@postgres/speckle'
+    depends_on:
+      speckle-server:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - speckle-network
+
+  fileimport-service:
+    image: speckle/speckle-fileimport-service:latest
+    restart: always
+    mem_limit: 2g
+    memswap_limit: 2g
+    cpus: '2.0'
+    environment:
+      PORT: '3000'
+      HOST: '0.0.0.0'
+      SPECKLE_SERVER_URL: 'http://speckle-server:3000'
+      PG_CONNECTION_STRING: 'postgres://speckle:speckle@postgres/speckle'
+      REDIS_URL: 'redis://redis'
+      
+      # MISMA CONFIGURACIÓN S3 QUE SPECKLE-SERVER
+      S3_ENDPOINT: 'http://minio:9000'
+      S3_PUBLIC_ENDPOINT: 'https://minio.datificabimcloud.dpdns.org'
+      S3_ACCESS_KEY: 'minioadmin'
+      S3_SECRET_KEY: 'minioadmin'
+      S3_BUCKET: 'speckle-server'
+      S3_REGION: 'us-east-1'
+      # CAMBIO CRÍTICO: Path-style para debug
+      S3_FORCE_PATH_STYLE: 'true'   # Cambiar a path-style
+      S3_USE_SSL: 'false'
+      S3_PUBLIC_USE_SSL: 'true'
+      
+      # Features
+      FF_EXPERIMENTAL_IFC_IMPORTER_ENABLED: 'true'
+      IFC_PROCESSING_ENABLED: 'true'
+      
+      LOG_LEVEL: 'info'
+      LOG_PRETTY: 'true'
+      FILE_IMPORT_TIMEOUT_MS: '1800000'
+      FILE_SIZE_LIMIT_MB: '1024'
+      NODE_OPTIONS: '--max-old-space-size=1536 --max-semi-space-size=256'
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s
+    depends_on:
+      speckle-server:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - speckle-network
+
+  # NGINX PARA MANEJAR SUBDOMINIOS
+  nginx:
+    image: nginx:alpine
+    restart: always
+    mem_limit: 256m
+    depends_on:
+      - speckle-server
+      - speckle-frontend-2
+      - minio
+    ports:
+      - "34355:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - speckle-network
+
+networks:
+  speckle-network:
+    driver: bridge
