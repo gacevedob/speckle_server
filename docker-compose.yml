@@ -85,9 +85,9 @@ services:
       BUCKET=\"$${S3_BUCKET:-speckle-server}\";
       PUBLIC=\"$${MINIO_SET_PUBLIC:-true}\";
       CORS_FILE=\"\";
-      if [ -f /config/cors.json ]; then
+      if [ -s /config/cors.json ]; then
         CORS_FILE=/config/cors.json;
-      elif [ -f /config/cors.xml ]; then
+      elif [ -s /config/cors.xml ]; then
         CORS_FILE=/config/cors.xml;
       fi;
       echo 'Configuring MinIO bucket:' $$BUCKET;
@@ -97,7 +97,10 @@ services:
         mc anonymous set download myminio/$${BUCKET};
       fi;
       if [ -n \"$$CORS_FILE\" ]; then
-        mc cors set myminio/$${BUCKET} $$CORS_FILE;
+        echo \"Applying CORS from $$CORS_FILE\";
+        if ! mc cors set myminio/$${BUCKET} $$CORS_FILE; then
+          echo \"WARN: failed to apply CORS from $$CORS_FILE\" >&2;
+        fi;
       else
         echo 'No CORS file found, skipping CORS configuration';
       fi;
