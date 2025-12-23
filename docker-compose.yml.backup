@@ -100,18 +100,18 @@ services:
       elif [ -f /config/cors.xml ]; then
         CORS_FILE=/config/cors.xml;
       fi;
-      echo 'Configuring MinIO bucket:' $BUCKET;
+      echo 'Configuring MinIO bucket:' $$BUCKET;
       mc alias set myminio http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD};
-      mc mb myminio/${BUCKET} --ignore-existing;
-      if [ \"$PUBLIC\" = \"true\" ]; then
-        mc anonymous set download myminio/${BUCKET};
+      mc mb myminio/$${BUCKET} --ignore-existing;
+      if [ \"$$PUBLIC\" = \"true\" ]; then
+        mc anonymous set download myminio/$${BUCKET};
       fi;
-      if [ -n \"$CORS_FILE\" ]; then
-        mc cors set myminio/${BUCKET} $CORS_FILE;
+      if [ -n \"$$CORS_FILE\" ]; then
+        mc cors set myminio/$${BUCKET} $$CORS_FILE;
       else
         echo 'No CORS file found, skipping CORS configuration';
       fi;
-      mc cors list myminio/${BUCKET} || true;
+      mc cors list myminio/$${BUCKET} || true;
       echo 'MinIO bucket configured successfully';
       "
     networks:
