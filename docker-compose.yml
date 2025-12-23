@@ -85,10 +85,12 @@ services:
       BUCKET=\"$${S3_BUCKET:-speckle-server}\";
       PUBLIC=\"$${MINIO_SET_PUBLIC:-true}\";
       CORS_FILE=\"\";
-      if [ -s /config/cors.json ]; then
-        CORS_FILE=/config/cors.json;
-      elif [ -s /config/cors.xml ]; then
-        CORS_FILE=/config/cors.xml;
+      JSON_CORS=/config/cors.json;
+      XML_CORS=/config/cors.xml;
+      if [ -s \"$JSON_CORS\" ]; then
+        CORS_FILE=$JSON_CORS;
+      elif [ -s \"$XML_CORS\" ]; then
+        CORS_FILE=$XML_CORS;
       fi;
       echo 'Configuring MinIO bucket:' $$BUCKET;
       mc alias set myminio http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD};
@@ -100,11 +102,14 @@ services:
         echo \"Applying CORS from $$CORS_FILE\";
         if ! mc cors set myminio/$${BUCKET} $$CORS_FILE; then
           echo \"WARN: failed to apply CORS from $$CORS_FILE\" >&2;
+          if [ \"$$CORS_FILE\" = \"$JSON_CORS\" ] && [ -s \"$XML_CORS\" ]; then
+            echo \"Retrying CORS with $XML_CORS\";
+            mc cors set myminio/$${BUCKET} $XML_CORS || echo \"WARN: failed to apply fallback CORS from $XML_CORS\" >&2;
+          fi;
         fi;
       else
         echo 'No CORS file found, skipping CORS configuration';
       fi;
-      mc cors list myminio/$${BUCKET} || true;
       echo 'MinIO bucket configured successfully';
       "
     networks:
